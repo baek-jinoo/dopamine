@@ -34,6 +34,9 @@ import numpy as np
 import tensorflow as tf
 
 import gin.tf
+import pickle
+import tempfile
+import random
 
 
 def load_gin_configs(gin_files, gin_bindings):
@@ -144,7 +147,10 @@ class Runner(object):
                num_iterations=200,
                training_steps=250000,
                evaluation_steps=125000,
-               max_steps_per_episode=27000):
+               max_steps_per_episode=27000,
+               render=False,
+               episode_sample_len=200,
+               episode_period_for_render_sample=100):
     """Initialize the Runner object in charge of running a full experiment.
 
     Args:
@@ -162,6 +168,11 @@ class Runner(object):
       evaluation_steps: int, the number of evaluation steps to perform.
       max_steps_per_episode: int, maximum number of steps after which an episode
         terminates.
+      render: bool, save the rgb array render, default False
+      episode_sample_len: int, length of the sample frame of the rendering capture.
+        None indicates that it records the whole thing if render is True
+      episode_render_period: int, period in which we capture a sample of
+        rendering from an episode of episode_sample_len. default 100
 
     This constructor will take the following actions:
     - Initialize an environment.
@@ -181,6 +192,11 @@ class Runner(object):
     self._base_dir = base_dir
     self._create_directories()
     self._summary_writer = tf.summary.FileWriter(self._base_dir)
+    self._render = render
+    self._episode_sample_len = episode_sample_len
+    self._episode_render_period = episode_render_period
+
+    self._temp_file_for_rgb = None
 
     self._environment = create_environment_fn()
     # Set up a session and initialize variables.
@@ -192,6 +208,16 @@ class Runner(object):
     self._sess.run(tf.global_variables_initializer())
 
     self._initialize_checkpointer_and_maybe_resume(checkpoint_file_prefix)
+    self._setup_render_temp_dir()
+
+  def _setup_render_temp_dir(self):
+    if not self._render:
+      return
+
+    self._environment.render('rgb_array')
+    self._temp_dir_for_rgb = tempfile.mkdtemp()
+    dirname = self._temp_dir_for_rgb
+    print('named temp dir for rgb_array', dirname)
 
   def _create_directories(self):
     """Create necessary sub-directories."""
@@ -247,6 +273,28 @@ class Runner(object):
     initial_observation = self._environment.reset()
     return self._agent.begin_episode(initial_observation)
 
+  def _run_one_render(self,
+          run_mode_str,
+          episode_count):
+    """Executes a single render in the environment
+
+    Args:
+      run_mode_str: str, describes the run mode for this agent.
+      episode_count: int, episode count under the current phase
+    """
+    if not self._render:
+        return False
+
+    filename = f'{self._temp_dir_for_rgb}/{run_mode_str}_episode_{str(episode_count)}'
+    if not self._temp_file_for_rgb or \
+            self._temp_file_for_rgb.name != filename:
+        self._temp_file_for_rgb = open(filename, 'ab')
+
+    if self._render and \
+            self._temp_file_for_rgb is not None:
+      rgb = self._environment.render('rgb_array')
+      pickle.dump(rgb, self._temp_file_for_rgb)
+
   def _run_one_step(self, action):
     """Executes a single step in the environment.
 
@@ -268,8 +316,12 @@ class Runner(object):
     """
     self._agent.end_episode(reward)
 
-  def _run_one_episode(self):
+  def _run_one_episode(self, run_mode_str, episode_count):
     """Executes a full trajectory of the agent interacting with the environment.
+
+    Args:
+      run_mode_str: str, describes the run mode for this agent.
+      episode_count: int, episode count under the current phase
 
     Returns:
       The number of steps taken and the total reward.
@@ -277,12 +329,24 @@ class Runner(object):
     step_number = 0
     total_reward = 0.
 
+    should_sample_render = episode_count % self._episode_render_period == 0
+
+    max_index = self._max_steps_per_episode - self._episode_sample_len - 1
+    min_index = 0
+    render_start_index = random.randint(min_index, max_index)
+
     action = self._initialize_episode()
     is_terminal = False
 
     # Keep interacting until we reach a terminal state.
     while True:
       observation, reward, is_terminal = self._run_one_step(action)
+
+      if self._render and should_sample_render:
+        if self._episode_sample_len is None or \
+                (step_number >= render_start_index and \
+                step_number <= self._episode_sample_len + render_start_index):
+          self._run_one_render(run_mode_str, episode_count)
 
       total_reward += reward
       step_number += 1
@@ -327,7 +391,7 @@ class Runner(object):
     sum_returns = 0.
 
     while step_count < min_steps:
-      episode_length, episode_return = self._run_one_episode()
+      episode_length, episode_return = self._run_one_episode(run_mode_str, step_count)
       statistics.append({
           '{}_episode_lengths'.format(run_mode_str): episode_length,
           '{}_episode_returns'.format(run_mode_str): episode_return
