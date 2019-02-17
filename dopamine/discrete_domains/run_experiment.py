@@ -150,7 +150,7 @@ class Runner(object):
                max_steps_per_episode=27000,
                render=False,
                episode_sample_len=200,
-               episode_period_for_render_sample=100):
+               episode_render_period=100):
     """Initialize the Runner object in charge of running a full experiment.
 
     Args:
@@ -275,20 +275,23 @@ class Runner(object):
 
   def _run_one_render(self,
           run_mode_str,
+          start_render_frame,
           episode_count):
     """Executes a single render in the environment
 
     Args:
       run_mode_str: str, describes the run mode for this agent.
+      start_render_frame: int, the starting render frame for this episode
       episode_count: int, episode count under the current phase
     """
     if not self._render:
         return False
 
-    filename = f'{self._temp_dir_for_rgb}/{run_mode_str}_episode_{str(episode_count)}'
+    filename = f'{self._temp_dir_for_rgb}/{run_mode_str}_episode_{str(episode_count)}_{str(start_render_frame)}'
     if not self._temp_file_for_rgb or \
             self._temp_file_for_rgb.name != filename:
         self._temp_file_for_rgb = open(filename, 'ab')
+        print(f'created temp file for rgb rendering at {filename}')
 
     if self._render and \
             self._temp_file_for_rgb is not None:
@@ -316,7 +319,11 @@ class Runner(object):
     """
     self._agent.end_episode(reward)
 
-  def _run_one_episode(self, run_mode_str, episode_count):
+  def _run_one_episode(self,
+          run_mode_str,
+          episode_count,
+          start_render_frame,
+          last_episode_length=None):
     """Executes a full trajectory of the agent interacting with the environment.
 
     Args:
@@ -331,7 +338,7 @@ class Runner(object):
 
     should_sample_render = episode_count % self._episode_render_period == 0
 
-    max_index = self._max_steps_per_episode - self._episode_sample_len - 1
+    max_index = last_episode_length if last_episode_length else 400
     min_index = 0
     render_start_index = random.randint(min_index, max_index)
 
@@ -346,7 +353,7 @@ class Runner(object):
         if self._episode_sample_len is None or \
                 (step_number >= render_start_index and \
                 step_number <= self._episode_sample_len + render_start_index):
-          self._run_one_render(run_mode_str, episode_count)
+          self._run_one_render(run_mode_str, render_start_index, episode_count)
 
       total_reward += reward
       step_number += 1
@@ -390,8 +397,11 @@ class Runner(object):
     num_episodes = 0
     sum_returns = 0.
 
+    episode_length = None
     while step_count < min_steps:
-      episode_length, episode_return = self._run_one_episode(run_mode_str, step_count)
+      episode_length, episode_return = self._run_one_episode(run_mode_str,
+              step_count,
+              num_episodes)
       statistics.append({
           '{}_episode_lengths'.format(run_mode_str): episode_length,
           '{}_episode_returns'.format(run_mode_str): episode_return
