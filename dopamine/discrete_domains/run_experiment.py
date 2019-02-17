@@ -358,7 +358,7 @@ class Runner(object):
         if self._episode_sample_len is None or \
                 (step_number >= render_start_index and \
                 step_number <= self._episode_sample_len + render_start_index):
-          self._run_one_render(run_mode_str, render_start_index, episode_count)
+          self._run_one_render(iteration, run_mode_str, render_start_index, episode_count)
 
       total_reward += reward
       step_number += 1
