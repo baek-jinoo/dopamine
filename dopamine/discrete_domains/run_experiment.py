@@ -274,12 +274,14 @@ class Runner(object):
     return self._agent.begin_episode(initial_observation)
 
   def _run_one_render(self,
+          iteration,
           run_mode_str,
           start_render_frame,
           episode_count):
     """Executes a single render in the environment
 
     Args:
+      iteration: int, current iteration number, used as a global_step for saving
       run_mode_str: str, describes the run mode for this agent.
       start_render_frame: int, the starting render frame for this episode
       episode_count: int, episode count under the current phase
@@ -287,11 +289,12 @@ class Runner(object):
     if not self._render:
         return False
 
-    filename = f'{self._temp_dir_for_rgb}/{run_mode_str}_episode_{str(episode_count)}_{str(start_render_frame)}'
+    filename = f'{iteration}_{run_mode_str}_episode_{str(episode_count)}_{str(start_render_frame)}'
+    filepath = f'{self._temp_dir_for_rgb}/{filename}'
     if not self._temp_file_for_rgb or \
-            self._temp_file_for_rgb.name != filename:
-        self._temp_file_for_rgb = open(filename, 'ab')
-        print(f'created temp file for rgb rendering at {filename}')
+            self._temp_file_for_rgb.name != filepath:
+        self._temp_file_for_rgb = open(filepath, 'ab')
+        print(f'created temp file for rgb rendering at {filepath}')
 
     if self._render and \
             self._temp_file_for_rgb is not None:
@@ -320,6 +323,7 @@ class Runner(object):
     self._agent.end_episode(reward)
 
   def _run_one_episode(self,
+          iteration,
           run_mode_str,
           episode_count,
           start_render_frame,
@@ -327,6 +331,7 @@ class Runner(object):
     """Executes a full trajectory of the agent interacting with the environment.
 
     Args:
+      iteration: int, current iteration number, used as a global_step for saving
       run_mode_str: str, describes the run mode for this agent.
       episode_count: int, episode count under the current phase
 
@@ -377,7 +382,7 @@ class Runner(object):
 
     return step_number, total_reward
 
-  def _run_one_phase(self, min_steps, statistics, run_mode_str):
+  def _run_one_phase(self, min_steps, statistics, iteration, run_mode_str):
     """Runs the agent/environment loop until a desired number of steps.
 
     We follow the Machado et al., 2017 convention of running full episodes,
@@ -387,6 +392,7 @@ class Runner(object):
       min_steps: int, minimum number of steps to generate in this phase.
       statistics: `IterationStatistics` object which records the experimental
         results.
+      iteration: int, current iteration number, used as a global_step for saving
       run_mode_str: str, describes the run mode for this agent.
 
     Returns:
@@ -399,7 +405,8 @@ class Runner(object):
 
     episode_length = None
     while step_count < min_steps:
-      episode_length, episode_return = self._run_one_episode(run_mode_str,
+      episode_length, episode_return = self._run_one_episode(iteration,
+              run_mode_str,
               num_episodes,
               episode_length)
       statistics.append({
@@ -418,12 +425,13 @@ class Runner(object):
       sys.stdout.flush()
     return step_count, sum_returns, num_episodes
 
-  def _run_train_phase(self, statistics):
+  def _run_train_phase(self, statistics, iteration):
     """Run training phase.
 
     Args:
       statistics: `IterationStatistics` object which records the experimental
         results. Note - This object is modified by this method.
+      iteration: int, current iteration number, used as a global_step for saving
 
     Returns:
       num_episodes: int, The number of episodes run in this phase.
@@ -433,7 +441,7 @@ class Runner(object):
     self._agent.eval_mode = False
     start_time = time.time()
     number_steps, sum_returns, num_episodes = self._run_one_phase(
-        self._training_steps, statistics, 'train')
+        self._training_steps, statistics, iteration, 'train')
     average_return = sum_returns / num_episodes if num_episodes > 0 else 0.0
     statistics.append({'train_average_return': average_return})
     time_delta = time.time() - start_time
@@ -443,12 +451,13 @@ class Runner(object):
                     number_steps / time_delta)
     return num_episodes, average_return
 
-  def _run_eval_phase(self, statistics):
+  def _run_eval_phase(self, statistics, iteration):
     """Run evaluation phase.
 
     Args:
       statistics: `IterationStatistics` object which records the experimental
         results. Note - This object is modified by this method.
+      iteration: int, current iteration number, used as a global_step for saving
 
     Returns:
       num_episodes: int, The number of episodes run in this phase.
@@ -457,7 +466,7 @@ class Runner(object):
     # Perform the evaluation phase -- no learning.
     self._agent.eval_mode = True
     _, sum_returns, num_episodes = self._run_one_phase(
-        self._evaluation_steps, statistics, 'eval')
+        self._evaluation_steps, statistics, iteration, 'eval')
     average_return = sum_returns / num_episodes if num_episodes > 0 else 0.0
     tf.logging.info('Average undiscounted return per evaluation episode: %.2f',
                     average_return)
@@ -481,9 +490,9 @@ class Runner(object):
     statistics = iteration_statistics.IterationStatistics()
     tf.logging.info('Starting iteration %d', iteration)
     num_episodes_train, average_reward_train = self._run_train_phase(
-        statistics)
+        statistics, iteration)
     num_episodes_eval, average_reward_eval = self._run_eval_phase(
-        statistics)
+        statistics, iteration)
 
     self._save_tensorboard_summaries(iteration, num_episodes_train,
                                      average_reward_train, num_episodes_eval,
@@ -595,7 +604,7 @@ class TrainRunner(Runner):
     """
     statistics = iteration_statistics.IterationStatistics()
     num_episodes_train, average_reward_train = self._run_train_phase(
-        statistics)
+        statistics, iteration)
 
     self._save_tensorboard_summaries(iteration, num_episodes_train,
                                      average_reward_train)
