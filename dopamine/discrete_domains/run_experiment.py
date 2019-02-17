@@ -400,8 +400,8 @@ class Runner(object):
     episode_length = None
     while step_count < min_steps:
       episode_length, episode_return = self._run_one_episode(run_mode_str,
-              step_count,
-              num_episodes)
+              num_episodes,
+              episode_length)
       statistics.append({
           '{}_episode_lengths'.format(run_mode_str): episode_length,
           '{}_episode_returns'.format(run_mode_str): episode_return
@@ -413,6 +413,7 @@ class Runner(object):
       # without generating a line break.
       sys.stdout.write('Steps executed: {} '.format(step_count) +
                        'Episode length: {} '.format(episode_length) +
+                       'Total episodes: {} '.format(num_episodes) +
                        'Return: {}\r'.format(episode_return))
       sys.stdout.flush()
     return step_count, sum_returns, num_episodes
